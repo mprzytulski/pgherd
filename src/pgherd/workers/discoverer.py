@@ -19,6 +19,7 @@ class DiscovererServer(object):
         self.__sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, True)
         self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+        self.__sock.settimeout(0.5)
         self.__sock.bind(('0.0.0.0', self.__config.port))
         self.__addr = '255.255.255.255', self.__config.port
 
@@ -66,10 +67,13 @@ class DiscovererListener(Thread):
 
     def run(self, server):
         while self._event.is_set():
-            data, src = server.recv(1 << 12)
-            if src[0] not in self._config.local_ips:
-                e = DiscovererEvent(src, data.decode())
-                dispatcher.notify('discoverer.broadcast.receive', e)
+            try:
+                data, src = server.recv(1 << 12)
+                if src[0] not in self._config.local_ips:
+                    e = DiscovererEvent(src, data.decode())
+                    dispatcher.notify('discoverer.broadcast.receive', e)
+            except socket.timeout:
+                pass
 
 
 class Discoverer(Thread):
@@ -80,6 +84,8 @@ class Discoverer(Thread):
     _listener  = None
     _server    = None
 
+    logger = logging.getLogger('default')
+
     def __init__(self, event, conf):
         self._config = conf
         self._event = event
@@ -88,7 +94,12 @@ class Discoverer(Thread):
     def broadcast_receive(self, event):
         print event
 
+    def is_ready(self):
+        return False
+
     def run(self):
+
+        self.logger.info("Starting Discoverer thread")
 
         self._server = DiscovererServer(self._event, self._config)
         self._server.send("online")

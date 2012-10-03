@@ -1,5 +1,7 @@
 __author__ = 'mike'
 
+import threading
+
 class EventHook(object):
 
     def __init__(self):
@@ -40,3 +42,4 @@ class Event(object):
     pass
 
 dispatcher = Dispatcher()
+event = threading.Event()

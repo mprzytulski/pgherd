@@ -4,17 +4,25 @@ import sys
 import daemon
 import logging
 import logging.handlers
-
-from threading import Event
 import signal
+import time
 
+from pgherd.events import event
 from pgherd import Configuration
 from pgherd.workers import Monitor
 from pgherd.workers import Discoverer
+from pgherd.workers import Negotiator
 
-event = Event()
+class Daemon(object):
+    monitor    = None
+    discoverer = None
+    negotiator = None
+
+daemon = Daemon()
+
 
 def handle_event(a, b):
+    daemon.negotiator.stop()
     event.clear()
 
 def main_thread(conf):
@@ -50,11 +58,17 @@ def main_thread(conf):
         signal.signal(signal.SIGTERM, handle_event)
         signal.signal(signal.SIGINT, handle_event)
 
-        monitor = Monitor(event, conf.monitor)
-        discoverer = Discoverer(event, conf.discoverer)
+        daemon.discoverer = Discoverer(event, conf.discoverer)
+        daemon.negotiator = Negotiator(event, conf.daemon)
+        daemon.monitor = Monitor(event, conf.monitor, daemon.discoverer)
 
-        monitor.run()
-        discoverer.run()
+        daemon.discoverer.start()
+        daemon.negotiator.start()
+
+        while not daemon.discoverer.is_ready():
+            time.sleep(0.5)
+
+        daemon.monitor.start()
 
 
         while event.is_set():
