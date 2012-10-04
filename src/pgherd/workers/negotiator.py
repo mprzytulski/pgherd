@@ -1,7 +1,7 @@
 __author__ = 'mike'
 
 import logging
-import pickle
+import json
 import SocketServer
 
 from threading import Thread
@@ -10,14 +10,21 @@ from pgherd.events import dispatcher
 
 class TcpRequestHandler(SocketServer.StreamRequestHandler):
 
+    def send(self, message):
+        self.wfile.write(str(message))
+
+    def read(self):
+        message = json.loads(self.rfile.readline().strip())
+        return message
+
     def handle(self):
         from pgherd.daemon import  daemon
         try:
             self.logger = logging.getLogger('default')
-            self.wfile.write(str(daemon.node))
+            self.send(NodeStatus(daemon.node))
             while event.is_set():
                 self.logger.debug('Wating for message')
-                message = pickle.loads(self.rfile.readline().strip())
+                message = self.read()
                 dispatcher.notify('negotiator.message.receive', message)
 
         except Exception, ex:
@@ -27,10 +34,13 @@ class TcpRequestHandler(SocketServer.StreamRequestHandler):
 
 class NegotiatorMessage(object):
 
-    _node = None
+    _message = None
 
-    def __init__(self, node):
-        self._node = node
+    def __init__(self, message):
+        self._message = message
+
+    def __str__(self):
+        return json.dumps({'type': __name__, 'message': self._message.as_dict()})
 
 class NodeConnectToClusterMessage(NegotiatorMessage):
     pass
@@ -38,7 +48,7 @@ class NodeConnectToClusterMessage(NegotiatorMessage):
 class NodeChangeStatusMessage(NegotiatorMessage):
     pass
 
-class NodePropagateStatus(NegotiatorMessage):
+class NodeStatus(NegotiatorMessage):
     pass
 
 class Negotiator(Thread):

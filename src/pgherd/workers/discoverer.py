@@ -28,9 +28,12 @@ class Node(object):
     def is_master(self):
         return self._is_master
 
+    def as_dict(self):
+        return {'name': self._name, 'x_log_location': self._x_log_location,
+                'is_recovery': self._is_recovery, 'is_master': self._is_master}
+
     def __str__(self):
-        return json.dumps({'name': self._name, 'x_log_location': self._x_log_location,
-                           'is_recovery': self._is_recovery, 'is_master': self._is_master})
+        return json.dumps(self.as_dict())
 
     def __xlog_to_bytes(self, xlog):
         """
