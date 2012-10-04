@@ -134,7 +134,7 @@ class DiscovererListener(Thread):
                 data, src = server.recv(1 << 12)
                 if src[0] not in self._config.local_ips:
                     e = DiscovererEvent(src, data.decode())
-                    dispatcher.notify('discoverer.broadcast.receive', e)
+                    dispatcher.notify('discoverer.message.receive', e)
             except socket.timeout:
                 pass
 
@@ -168,7 +168,7 @@ class Discoverer(Thread):
         self._server = DiscovererServer(self._event, self._config)
         self._server.send("online")
 
-        dispatcher.addListener('discoverer.broadcast.receive', self.broadcast_receive)
+        dispatcher.addListener('discoverer.message.receive', self.broadcast_receive)
 
         self._listener = DiscovererListener(self._config)
         self._listener.run(self._server)

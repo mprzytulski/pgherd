@@ -1,5 +1,6 @@
 __author__ = 'mike'
 
+
 import logging
 import json
 import SocketServer
@@ -7,6 +8,7 @@ import SocketServer
 from threading import Thread
 from pgherd.events import event
 from pgherd.events import dispatcher
+from pgherd.workers.negotiator.messages import NodeStatus
 
 class TcpRequestHandler(SocketServer.StreamRequestHandler):
 
@@ -32,24 +34,6 @@ class TcpRequestHandler(SocketServer.StreamRequestHandler):
         finally:
             self.request.close()
 
-class NegotiatorMessage(object):
-
-    _message = None
-
-    def __init__(self, message):
-        self._message = message
-
-    def __str__(self):
-        return json.dumps({'type': __name__, 'message': self._message.as_dict()})
-
-class NodeConnectToClusterMessage(NegotiatorMessage):
-    pass
-
-class NodeChangeStatusMessage(NegotiatorMessage):
-    pass
-
-class NodeStatus(NegotiatorMessage):
-    pass
 
 class Negotiator(Thread):
 
