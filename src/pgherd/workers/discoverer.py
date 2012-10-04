@@ -113,6 +113,12 @@ class DiscovererEvent(Event):
         self._src = src
         self._message = message
 
+    def get_from(self):
+        return self._src
+
+    def get_message(self):
+        return self._message
+
     def __str__(self):
         return "Msg: '{}' from: {}".format(self._message, self._src)
 
@@ -150,7 +156,7 @@ class Discoverer(Thread):
         super(Discoverer, self).__init__()
 
     def broadcast_receive(self, event):
-        print event
+        self.logger.debug("Recive discovery request: {}".format(event))
 
     def is_ready(self):
         return False

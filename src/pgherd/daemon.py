@@ -33,6 +33,7 @@ class Daemon(object):
         while status is None:
             status = (self.connections.get_local_status())
             if status is None:
+                self.logger.debug("Wating for local node to startup")
                 time.sleep(1)
 
         self.node = Node(*status)
@@ -42,8 +43,8 @@ class Daemon(object):
         self.negotiator = Negotiator(conf.daemon)
 #        daemon.monitor = Monitor(event, conf.monitor, daemon.discoverer)
 
-        self.discoverer.start()
         self.negotiator.start()
+        self.discoverer.start()
 
         #while not self.discoverer.is_ready():
         #    time.sleep(0.5)
