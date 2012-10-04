@@ -18,6 +18,7 @@ class Monitor(object):
     port = 5432
     user = 'pgherd'
     password = 'pgherd'
+    dbname = 'postgres'
     interval = 3
     timeout = 3
     attempts = 5

@@ -8,21 +8,13 @@ import signal
 import time
 
 from pgherd.events import event
+from pgherd.daemon import daemon
 from pgherd import Configuration
-from pgherd.workers import Monitor
-from pgherd.workers import Discoverer
-from pgherd.workers import Negotiator
-
-class Daemon(object):
-    monitor    = None
-    discoverer = None
-    negotiator = None
-
-daemon = Daemon()
 
 
 def handle_event(a, b):
-    daemon.negotiator.stop()
+    if daemon is not None:
+        daemon.negotiator.stop()
     event.clear()
 
 def main_thread(conf):
@@ -58,17 +50,7 @@ def main_thread(conf):
         signal.signal(signal.SIGTERM, handle_event)
         signal.signal(signal.SIGINT, handle_event)
 
-        daemon.discoverer = Discoverer(event, conf.discoverer)
-        daemon.negotiator = Negotiator(event, conf.daemon)
-        daemon.monitor = Monitor(event, conf.monitor, daemon.discoverer)
-
-        daemon.discoverer.start()
-        daemon.negotiator.start()
-
-        while not daemon.discoverer.is_ready():
-            time.sleep(0.5)
-
-        daemon.monitor.start()
+        daemon.start(conf)
 
 
         while event.is_set():

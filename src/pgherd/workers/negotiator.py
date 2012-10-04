@@ -1,20 +1,20 @@
 __author__ = 'mike'
 
+import logging
+import pickle
+import SocketServer
+
 from threading import Thread
 from pgherd.events import event
 from pgherd.events import dispatcher
 
-import logging
-import pickle
-
-
-import SocketServer
-
 class TcpRequestHandler(SocketServer.StreamRequestHandler):
 
     def handle(self):
+        from pgherd.daemon import  daemon
         try:
             self.logger = logging.getLogger('default')
+            self.wfile.write(str(daemon.node))
             while event.is_set():
                 self.logger.debug('Wating for message')
                 message = pickle.loads(self.rfile.readline().strip())
@@ -44,14 +44,11 @@ class NodePropagateStatus(NegotiatorMessage):
 class Negotiator(Thread):
 
     _config = None
-    _event  = None
     _server = None
     logger = logging.getLogger('default')
 
-    def __init__(self, event, config, discoverer):
+    def __init__(self, config):
         self._config = config
-        self._event = event
-        self._discoverer = discoverer
         super(Negotiator, self).__init__()
 
     def handle_message(self, event):
