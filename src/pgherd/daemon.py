@@ -3,13 +3,14 @@ __author__ = 'mike'
 import time
 import os
 import logging
+import socket
 
 from pgherd.events import event
 from pgherd.workers import Monitor
 from pgherd.workers import Discoverer
 from pgherd.workers import Negotiator
 from pgherd.workers.monitor import Connections
-from pgherd.workers.discoverer import Node
+from pgherd.workers.negotiator import Node
 
 class Daemon(object):
 
@@ -25,7 +26,17 @@ class Daemon(object):
 
     def start(self, conf):
 
-        self.node_name = os.uname()[1]
+        try:
+            self.node_name = os.uname()[1]
+            if conf.daemon.listen == '0.0.0.0':
+                self.node_address = socket.getaddrbyhost(self.node_fqdn)
+            else:
+                self.node_address = conf.daemon.listen
+
+            self.node_fqdn = socket.gethostbyaddr(self.node_address)[0]
+        except:
+            self.logger.error("Failed getting node information")
+            return 1
 
         self.connections = Connections(conf.monitor, self.node_name)
 
@@ -48,6 +59,7 @@ class Daemon(object):
 
         #while not self.discoverer.is_ready():
         #    time.sleep(0.5)
+        return 0
 
 
 #        self.monitor.start()

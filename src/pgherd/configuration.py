@@ -11,7 +11,9 @@ class Logging(object):
 
 class Daemon(object):
     listen = None
+    netmask = None
     port = None
+
 
 class Monitor(object):
     host = 'localhost'

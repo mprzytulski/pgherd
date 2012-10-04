@@ -9,63 +9,6 @@ from threading import Thread
 from pgherd.events import dispatcher, Event
 from pgherd.events import event
 
-class Node(object):
-
-    _name = None
-    _x_log_location = 0
-    _is_recovery = False
-    _is_master = None
-
-    def __init__(self, name = "", xlog_location = 0, is_recovery = False, is_master = False):
-        self._name = name
-        self._x_log_location = self.__xlog_to_bytes(xlog_location)
-        self._is_recovery = is_recovery
-        self._is_master = is_master
-
-    def get_name(self):
-        return self._name
-
-    def is_master(self):
-        return self._is_master
-
-    def as_dict(self):
-        return {'name': self._name, 'x_log_location': self._x_log_location,
-                'is_recovery': self._is_recovery, 'is_master': self._is_master}
-
-    def __str__(self):
-        return json.dumps(self.as_dict())
-
-    def __xlog_to_bytes(self, xlog):
-        """
-        Convert an xlog number like '0/C6321D98' to an integer representing the
-        number of bytes into the xlog.
-
-        Logic here is taken from
-        https://github.com/mhagander/munin-plugins/blob/master/postgres/postgres_streaming_.in.
-        I assume it's correct...
-        """
-        if xlog is None:
-            return 0
-        logid, offset = xlog.split('/')
-        return (int('ffffffff', 16) * int(logid, 16)) + int(offset, 16)
-
-class Nodes(object):
-
-    _nodes = {}
-    _master = None
-
-    def add(self, node):
-        if not self.nodes.has_key(node.get_name()):
-            self._nodes[node.get_name()] = node
-            if node.is_master():
-                self._master = node.get_name()
-
-    def get_master(self):
-        if self._master is not None:
-            return self._nodes[self._master]
-        else:
-            return None
-
 class DiscovererServer(object):
     __slots__ = '__sock', '__addr', '__config', '__event'
 
@@ -78,7 +21,7 @@ class DiscovererServer(object):
         self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, True)
         self.__sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
         self.__sock.settimeout(0.5)
-        self.__sock.bind(('0.0.0.0', self.__config.port))
+        self.__sock.bind((self.__config.listen, self.__config.port))
         self.__addr = '255.255.255.255', self.__config.port
 
     def __del__(self):
@@ -147,8 +90,6 @@ class Discoverer(Thread):
     _listener  = None
     _server    = None
 
-    _nodes = Nodes()
-
     logger = logging.getLogger('default')
 
     def __init__(self, conf):
@@ -156,6 +97,8 @@ class Discoverer(Thread):
         super(Discoverer, self).__init__()
 
     def broadcast_receive(self, event):
+        from pgherd.daemon import daemon
+        daemon.negotiator.start_negotiation(event.get_message())
         self.logger.debug("Recive discovery request: {}".format(event))
 
     def is_ready(self):
@@ -164,9 +107,10 @@ class Discoverer(Thread):
     def run(self):
 
         self.logger.info("Starting Discoverer thread")
+        from pgherd.daemon import daemon
 
         self._server = DiscovererServer(self._event, self._config)
-        self._server.send("online")
+        self._server.send(json.dumps({'node': daemon.node_name, 'address': daemon.node_address, 'port': self._config.port}))
 
         dispatcher.addListener('discoverer.message.receive', self.broadcast_receive)
 
