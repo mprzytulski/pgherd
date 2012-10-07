@@ -21,6 +21,10 @@ class Monitor(object):
     user = 'pgherd'
     password = 'pgherd'
     dbname = 'postgres'
+
+    data_dir = '/var/lib/postgresql-9.2/data'
+    conf_dir = '/etc/postgresql-9.2'
+
     interval = 3
     timeout = 3
     attempts = 5
@@ -28,7 +32,9 @@ class Monitor(object):
 class Discoverer(object):
     auto = True
     port = 8766
+    listen = None
     local_ips = []
+
 
 class Commands(object):
     promote_to_master = 'internal'

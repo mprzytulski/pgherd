@@ -14,7 +14,11 @@ from pgherd import Configuration
 
 def handle_event(a, b):
     if daemon is not None:
-        daemon.negotiator.stop()
+        if daemon.negotiator is not None:
+            daemon.negotiator.stop()
+
+        if daemon.discoverer is not None:
+            daemon.discoverer.stop()
     event.clear()
 
 def main_thread(conf):

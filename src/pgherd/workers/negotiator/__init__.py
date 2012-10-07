@@ -5,6 +5,7 @@ import logging
 import json
 import SocketServer
 import socket
+import time
 
 from threading import Thread
 from pgherd.events import event
@@ -17,12 +18,18 @@ class Node(object):
     _x_log_location = 0
     _is_recovery = False
     _is_master = None
+    _version = None
 
-    def __init__(self, name = "", xlog_location = 0, is_recovery = False, is_master = False):
+    def __init__(self, name = "", xlog_location = 0, version = 0, is_recovery = False, is_master = False):
+        self.update(name, xlog_location, version, is_recovery, is_master)
+
+    def update(self, name = "", xlog_location = 0, version = 0, is_recovery = False, is_master = False):
         self._name = name
         self._x_log_location = self.__xlog_to_bytes(xlog_location)
+        self._version = version
         self._is_recovery = is_recovery
         self._is_master = is_master
+
 
     def get_name(self):
         return self._name
@@ -32,6 +39,7 @@ class Node(object):
 
     def as_dict(self):
         return {'name': self._name, 'x_log_location': self._x_log_location,
+                'version': self._version,
                 'is_recovery': self._is_recovery, 'is_master': self._is_master}
 
     def __str__(self):
@@ -81,10 +89,12 @@ class TcpRequestHandler(SocketServer.StreamRequestHandler):
         from pgherd.daemon import  daemon
         try:
             self.logger = logging.getLogger('default')
-            self.send(NodeStatus(daemon.node))
-            message = self.read()
+
+            if daemon.node is not None:
+                self.send(NodeStatus(daemon.node))
+
             while event.is_set():
-                self.logger.debug('Wating for message')
+                self.logger.debug('Negotiator wating for message')
                 message = self.read()
                 dispatcher.notify('negotiator.message.receive', message)
 
@@ -107,10 +117,11 @@ class NegotiatorConnection(Thread):
     def __init__(self, node_name, address, port):
         self._node_name = node_name
         self._address = address
-        self._port = port
+        self._port = int(port)
+        super(NegotiatorConnection, self).__init__()
 
     def reader(self):
-        self.logger.debug("Start negotiator reader thread for node: {}".format(self._node_name))
+        self.logger.debug("Start negotiator reader thread for node: '{}'".format(self._node_name))
         while event.is_set():
             try:
                 message = self.rfile.readline()
@@ -124,17 +135,17 @@ class NegotiatorConnection(Thread):
         while event.is_set():
             try:
                 self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            except socket.error, msg:
-                self.logger.exception("Failed connecting to negotiator on: {}".format(self._node_name))
-
-            try:
                 self._socket.connect((self._address, self._port))
             except socket.error, msg:
-                self.logger.exception("Failed connecting to negotiator on: {}".format(self._node_name))
+                self.logger.exception("Failed connecting to negotiator on: '{}' with {}:{}".format(self._node_name, self._address, self._port))
 
-            reader = Thread(target=self.reader)
-            reader.start()
-            reader.join()
+            finally:
+                time.sleep(1)
+
+
+#            reader = Thread(target=self.reader)
+#            reader.start()
+#            reader.join()
 
 
 class Negotiator(Thread):
@@ -156,13 +167,27 @@ class Negotiator(Thread):
     def broadcast(self, message):
         pass
 
-    def start_negotiation(self, broadcast_message):
-        connection = NegotiatorConnection(broadcast_message)
+    def start_negotiation(self, event):
+        msg = event.get_message()
+        address = msg.get_src()[0]
+
+        from pgherd.daemon import daemon
+        if address in daemon.config.discoverer.local_ips:
+            return
+
+        if address in ['127.0.0.1', '0.0.0.0']:
+            address = msg.get_src()[0]
+
+        port = msg.get('port')
+
+        self.logger.debug("Creating NegotiatorConnection to node: '{}' at: {}:{}".format(msg.get('node'), address, port))
+        connection = NegotiatorConnection(msg.get('node'), address, port)
         connection.start()
-        self._connections[broadcast_message['node_name']] = connection
+        self._connections[msg.get('node')] = connection
 
     def stop(self):
-        self._server.shutdown()
+        if self._server is not None:
+            self._server.shutdown()
 
     def run(self):
 
@@ -172,6 +197,7 @@ class Negotiator(Thread):
 
         SocketServer.ThreadingTCPServer.allow_reuse_address = True
         self._server = SocketServer.ThreadingTCPServer((self._config.listen, self._config.port), TcpRequestHandler)
+        self._server.timeout = 3
         self.logger.info("Negotiator thread listen on {}:{}".format(self._config.listen, self._config.port))
 
         self._server.serve_forever()

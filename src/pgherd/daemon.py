@@ -9,7 +9,7 @@ from pgherd.events import event
 from pgherd.workers import Monitor
 from pgherd.workers import Discoverer
 from pgherd.workers import Negotiator
-from pgherd.workers.monitor import Connections
+from pgherd.events import dispatcher
 from pgherd.workers.negotiator import Node
 
 class Daemon(object):
@@ -19,43 +19,44 @@ class Daemon(object):
     discoverer = None
     negotiator = None
 
+    config = None
+
     logger = logging.getLogger('default')
 
     node = None
     connections = None
 
+    def update_local_node_status(self, event):
+        if self.node is None:
+            self.node = Node(*event.get_status())
+        else:
+            self.node.update(*event.get_status())
+
     def start(self, conf):
+
+        self.config = conf
 
         try:
             self.node_name = os.uname()[1]
+            self.node_fqdn = socket.getfqdn(socket.gethostname())
             if conf.daemon.listen == '0.0.0.0':
-                self.node_address = socket.getaddrbyhost(self.node_fqdn)
+                self.node_address = socket.gethostbyname(self.node_fqdn)
             else:
                 self.node_address = conf.daemon.listen
 
-            self.node_fqdn = socket.gethostbyaddr(self.node_address)[0]
         except:
-            self.logger.error("Failed getting node information")
+            self.logger.exception("Failed getting node information")
             return 1
 
-        self.connections = Connections(conf.monitor, self.node_name)
-
-        status = None
-        while status is None:
-            status = (self.connections.get_local_status())
-            if status is None:
-                self.logger.debug("Wating for local node to startup")
-                time.sleep(1)
-
-        self.node = Node(*status)
-        self.logger.info("Current node status: {}".format(self.node))
+        dispatcher.addListener('monitor.local.update', self.update_local_node_status)
 
         self.discoverer = Discoverer(conf.discoverer)
         self.negotiator = Negotiator(conf.daemon)
-#        daemon.monitor = Monitor(event, conf.monitor, daemon.discoverer)
+        self.local_monitor = Monitor(conf.monitor, self.node_fqdn)
 
         self.negotiator.start()
         self.discoverer.start()
+        self.local_monitor.start()
 
         #while not self.discoverer.is_ready():
         #    time.sleep(0.5)
