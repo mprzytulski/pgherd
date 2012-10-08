@@ -4,6 +4,7 @@ import socket
 import time
 import logging
 import json
+import uuid
 import SocketServer
 
 from threading import Thread
@@ -52,25 +53,30 @@ class DiscovererMessage(object):
         if self._socket is None:
             return None
 #            raise
-        self._socket.sendto(msg, self._src)
+        self._socket.sendto(str(msg), self._src)
 
     def __str__(self):
         x = {'request': self._request}
         x.update(self._parts)
         return json.dumps(x)
 
+def discoverer_event_from_data(data, address = (0,0), socket = None):
+
+    data = json.loads(data)
+    request = data['request']
+    del data['request']
+    msg = DiscovererMessage(request, data, address, socket)
+    event = DiscovererEvent(msg)
+    logging.getLogger('default').debug(
+        "Discoverer server received: {} from: {}:{}".format(data, address[0], address[1]))
+    dispatcher.notify('discoverer.message.receive.{}'.format(request), event)
+
 class UDPHandler(SocketServer.BaseRequestHandler):
 
     logger = logging.getLogger('default')
 
     def handle(self):
-        data = json.loads(self.request[0].strip())
-        request = data['request']
-        del data['request']
-        msg = DiscovererMessage(request, data, self.client_address, self.request[1])
-        event = DiscovererEvent(msg)
-        self.logger.debug("Discoverer server received: {} from: {}:{}".format(data, self.client_address[0], self.client_address[1]))
-        dispatcher.notify('discoverer.message.receive.{}'.format(request), event)
+        discoverer_event_from_data(self.request[0].strip(), self.client_address, self.request[1])
 
 class DiscovererServer(Thread):
 
@@ -83,6 +89,10 @@ class DiscovererServer(Thread):
         self._port = port
         super(DiscovererServer, self).__init__()
 
+    def wait_for_startup(self):
+        while not hasattr(self, '_server'):
+            time.sleep(0.01)
+
     def run(self):
         self.logger.info("Starting discoverer UDP server at: {}:{}".format(self._listen, self._port))
         self._server = SocketServer.ThreadingUDPServer((self._listen, self._port), UDPHandler)
@@ -90,12 +100,13 @@ class DiscovererServer(Thread):
         self._server.serve_forever()
 
     def send(self, msg, address = None):
+        msg.add('id', str(uuid.uuid4()))
         str_data = str(msg)
 
         if address is None:
             address = '<broadcast>', self._port
 
-        self.logger.debug("Publisher sending message: {} to address: {}".format(str_data, address))
+        self.logger.debug("Sending message: {} to address: {}".format(str_data, address))
 
         assert self._server.socket.sendto(str_data, address) == len(str_data), 'Not all data was sent through the socket!'
 
@@ -127,8 +138,8 @@ class Discoverer(Thread):
     def master_lookup(self, event):
         from pgherd.daemon import daemon
         if daemon.node.is_master():
-            reply = DiscovererMessage(daemon.node)
-            event.get_src().send(reply)
+            msg = DiscovererMessage(daemon.node.as_dict())
+            event.get_message().reply(msg)
         self.logger.debug("Master lookup request received")
 
     def is_ready(self):
@@ -147,9 +158,7 @@ class Discoverer(Thread):
 
         self._server = DiscovererServer(self._config.listen, self._config.port)
         self._server.start()
-
-        while not hasattr(self._server, '_server'):
-            time.sleep(0.01)
+        self._server.wait_for_startup()
 
         msg = DiscovererMessage('node.up')
         msg.add('node', daemon.node_fqdn)

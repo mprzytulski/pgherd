@@ -3,10 +3,22 @@ __author__ = 'mike'
 import sys
 import logging
 import logging.handlers
+import signal
 
 from pgherd import Configuration
-from pgherd.commands import *
+from pgherd.commands import Interpreter
+from pgherd.events import event
 
+command = None
+
+def handle_event(a, b):
+    print 'handle event'
+    if command is not None:
+        print 'command'
+        if command.discoverer is not None:
+            print 'discoverer'
+            command.discoverer.stop()
+    event.clear()
 
 def main():
 
@@ -38,8 +50,19 @@ def main():
 
     logger.info("pgherd staring up...")
 
-    c = InitNode(conf)
-    c.run()
+#    event.set()
+
+#    signal.signal(signal.SIGTERM, handle_event)
+#    signal.signal(signal.SIGINT, handle_event)
+
+    i = Interpreter(conf)
+
+    if len(sys.argv) > 1:
+        i.onecmd(' '.join(sys.argv[1:]))
+    else:
+        i.cmdloop()
+
+
 
 
 if __name__ == "__main__":

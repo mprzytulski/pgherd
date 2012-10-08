@@ -34,6 +34,7 @@ class Discoverer(object):
     port = 8766
     listen = None
     local_ips = []
+    broadcast = '<broadcast>'
 
 
 class Commands(object):
