@@ -68,7 +68,7 @@ def discoverer_event_from_data(data, address = (0,0), socket = None):
     msg = DiscovererMessage(request, data, address, socket)
     event = DiscovererEvent(msg)
     logging.getLogger('default').debug(
-        "Discoverer server received: {} from: {}:{}".format(data, address[0], address[1]))
+        "Discoverer server received [{}]: {} from: {}:{}".format(request, data, address[0], address[1]))
     dispatcher.notify('discoverer.message.receive.{}'.format(request), event)
 
 class UDPHandler(SocketServer.BaseRequestHandler):
@@ -137,8 +137,8 @@ class Discoverer(Thread):
 
     def master_lookup(self, event):
         from pgherd.daemon import daemon
-        if daemon.node.is_master():
-            msg = DiscovererMessage(daemon.node.as_dict())
+        if daemon.node.is_master:
+            msg = DiscovererMessage('master.info', daemon.node.as_dict())
             event.get_message().reply(msg)
         self.logger.debug("Master lookup request received")
 

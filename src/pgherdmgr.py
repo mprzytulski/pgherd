@@ -33,7 +33,7 @@ def main():
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     conf = Configuration()
-    conf.parse(sys.argv[1:])
+    conf.parse(sys.argv[1:], 'manager'  )
 
     # Add the log message handler to the logger
     file = logging.handlers.RotatingFileHandler(conf.logging.destination, maxBytes=10485760, backupCount=5)
@@ -58,7 +58,16 @@ def main():
     i = Interpreter(conf)
 
     if len(sys.argv) > 1:
-        i.onecmd(' '.join(sys.argv[1:]))
+        args = sys.argv[1:]
+        if '-f' in args:
+            args.remove(args[args.index('-f')+1])
+            args.remove('-f')
+        if '--config' in args:
+            args.remove(args[args.index('--config')+1])
+            args.remove('--config')
+        if '--version' in args:
+            args.remove('--version')
+        i.onecmd(' '.join(args))
     else:
         i.cmdloop()
 

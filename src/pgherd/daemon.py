@@ -28,9 +28,9 @@ class Daemon(object):
 
     def update_local_node_status(self, event):
         if self.node is None:
-            self.node = Node(*event.get_status())
+            self.node = Node(event.get_status())
         else:
-            self.node.update(*event.get_status())
+            self.node.update(event.get_status())
 
     def start(self, conf):
 
@@ -52,7 +52,7 @@ class Daemon(object):
 
         self.discoverer = Discoverer(conf.discoverer)
         self.negotiator = Negotiator(conf.daemon)
-        self.local_monitor = Monitor(conf.monitor, self.node_fqdn)
+        self.local_monitor = Monitor(conf.monitor, self.node_fqdn, conf.discoverer.local_ips)
 
         self.negotiator.start()
         self.discoverer.start()

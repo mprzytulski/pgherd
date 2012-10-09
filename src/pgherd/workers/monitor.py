@@ -7,7 +7,7 @@ import json
 
 from threading import Thread
 from pgherd.events import event, dispatcher, Event
-from psycopg2.extras import LoggingConnection
+from psycopg2.extras import LoggingConnection, RealDictCursor
 
 class Connections:
 
@@ -17,23 +17,34 @@ class Connections:
     _local = None
     _local_config = None
     _local_node_name = None
+    _local_ips = []
 
     logger = logging.getLogger('default')
 
-    def __init__(self, local_config, local_node_name):
+    def __init__(self, local_config, local_node_name, local_ips):
         self._local_config = local_config
         self._local_node_name = local_node_name
+        local_ips.remove('127.0.0.1')
+        self._local_ips = local_ips
 
     def _get_status(self, connection):
         try:
-            cursor = connection.cursor()
+            cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             #"pg_last_xact_replay_timestamp() as xlog_time, " \
-            sql = "SELECT %s as node_name, pg_last_xlog_replay_location() as xlog_location,"\
-                  "version() as version, "\
+            sql = "SELECT " \
+                  "%s as node_name, "\
+                  "current_setting('port') as port, "\
+                  "case current_setting('listen_addresses') when '*' then '{}' else current_setting('listen_addresses') end as listen,"\
+                  "pg_last_xlog_replay_location() as xlog_location,"\
+                  "current_setting('server_version') as version, " \
                   "pg_is_in_recovery() as is_recovery, "\
-                  "case current_setting('hot_standby') when 'off' then true else false end as is_master"
+                  "case current_setting('hot_standby') when 'off' then true else false end as is_master".format(','.join(self._local_ips))
             cursor.execute(sql, (self._local_node_name,))
-            return cursor.fetchone()
+            data = cursor.fetchone()
+            listen = data['listen'].split(',')
+            listen.remove('127.0.0.1')
+            data['listen'] = listen
+            return data
         except psycopg2.OperationalError, psycopg2.InternalError:
             self._local = None
             self.logger.exception("Broken connection reconnecting")
@@ -106,6 +117,7 @@ class ConnectionMonitor(Thread):
     def __init__(self, config, connections):
         self._config = config
         self._connections = connections
+
         super(ConnectionMonitor, self).__init__()
 
 class LocalMonitor(ConnectionMonitor):
@@ -139,10 +151,12 @@ class Monitor(Thread):
     logger = logging.getLogger('default')
     _config = None
     _node_fqdn = None
+    _local_ips = []
 
-    def __init__(self, conf, fqdn):
+    def __init__(self, conf, fqdn, local_ips):
         self._config = conf
         self._node_fqdn = fqdn
+        self._local_ips = local_ips
         super(Monitor, self).__init__()
 
     def node_alive(self, event):
@@ -150,7 +164,8 @@ class Monitor(Thread):
 
     def run(self):
         self.logger.info("Starting Monitor thread")
-        self._connections = Connections(self._config, self._node_fqdn)
+
+        self._connections = Connections(self._config, self._node_fqdn, self._local_ips)
 
         self._local = LocalMonitor(self._config, self._connections)
         self._master = MasterMonitor(self._config, self._connections)

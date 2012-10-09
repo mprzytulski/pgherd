@@ -14,33 +14,44 @@ from pgherd.workers.negotiator.messages import NodeStatus
 
 class Node(object):
 
-    _name = None
-    _x_log_location = 0
-    _is_recovery = False
-    _is_master = None
-    _version = None
+    _params = {}
 
-    def __init__(self, name = "", xlog_location = 0, version = 0, is_recovery = False, is_master = False):
-        self.update(name, xlog_location, version, is_recovery, is_master)
+    def __init__(self, params):
+        self._params = params
 
-    def update(self, name = "", xlog_location = 0, version = 0, is_recovery = False, is_master = False):
-        self._name = name
-        self._x_log_location = self.__xlog_to_bytes(xlog_location)
-        self._version = version
-        self._is_recovery = is_recovery
-        self._is_master = is_master
+    def update(self, params):
+        self._params = params
 
+    @property
+    def name(self):
+        return self._params['name']
 
-    def get_name(self):
-        return self._name
+    @property
+    def x_log_location(self):
+        return self._params['x_log_location']
 
+    @property
+    def version(self):
+        return self._params['version']
+
+    @property
+    def listen(self):
+        return self._params['listen']
+
+    @property
+    def port(self):
+        return self._params['port']
+
+    @property
+    def is_recovery(self):
+        return self._params['is_recovery']
+
+    @property
     def is_master(self):
-        return self._is_master
+        return self._params['is_master']
 
     def as_dict(self):
-        return {'name': self._name, 'x_log_location': self._x_log_location,
-                'version': self._version,
-                'is_recovery': self._is_recovery, 'is_master': self._is_master}
+        return self._params
 
     def __str__(self):
         return json.dumps(self.as_dict())

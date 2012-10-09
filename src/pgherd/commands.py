@@ -5,6 +5,8 @@ import logging
 import socket
 import cmd
 import re
+import os
+import datetime
 
 from pgherd.events import dispatcher
 from pgherd.workers.discoverer import DiscovererMessage, discoverer_event_from_data
@@ -23,6 +25,15 @@ class Interpreter(cmd.Cmd):
         """Initialize current node as part of cluster"""
         cmd = InitNode(self._config)
         cmd.run()
+
+    def do_start(self, args):
+        pass
+
+    def do_stop(self, args):
+        pass
+
+    def do_reload(self, args):
+        pass
 
     def do_status(self, args):
         """Display current cluster status"""
@@ -104,15 +115,19 @@ class InitNode(Command):
         return "archive_mode = 'on'"
 
     def postgres_archive_command(self, val):
-        return "archive_command = 'pgherdmgr archive %p %f'"
+        return "archive_command = '{}'".format(self._config.postgres.archive_command)
 
     def postgres_hot_standby(self, val):
         return "hot_standby = on"
 
     def parse_postgres_conf(self, file_name):
+
+        if not os.path.exists(file_name):
+            raise Exception("Invalid postgresql configuration file: '{}'".format(file_name))
+
         lre = re.compile("(\#|)([^=]*)=([^\#]*)")
         new_config = []
-        with open(file_name) as file:
+        with open(file_name, 'r') as file:
             for line in file:
                 matches = lre.match(line)
                 param = matches.group(2)
@@ -124,25 +139,54 @@ class InitNode(Command):
 
                 new_config.append(line)
 
-    def write_recovery_conf(self, file_name):
+        new_name = file_name + datetime.datetime.now().strftime("%Y%m%d%H%M")
+        print "Rename: '{}' to '{}'... ".format(file_name, new_name)
+        os.rename(file_name, new_name)
+        print "done\n"
+
+        print "Writing new {}... ".format(file_name)
+        with open(file_name, 'w+') as file:
+            file.write(new_config)
+        print "done\n"
+
+    def write_recovery_conf(self, file_name, master):
+
+        print "Creating {}... ".format(file_name)
         content = """
         $ $EDITOR recovery.conf
         # Note that recovery.conf must be in $PGDATA directory.
 
         standby_mode          = 'on'
-        primary_conninfo      = 'host=192.168.0.10 port=5432 user=postgres'
-        trigger_file          = '/path_to/trigger'
-        restore_command       = 'cp /path_to/archive/%f "%p"'
-        """
-        file = open(file_name, 'w+')
-        file.write(content)
-        file.close()
+        primary_conninfo      = 'host={} port={} user={} password={}'
+        trigger_file          = '{}'
+        restore_command       = '{}'
+        """.format(master.get("name"), master.get("5432"),
+            self._config.replication.user, self._config.replication.password,
+            self._config.replication.trigger_file, self._config.replication.restore_command)
+        try:
+            file = open(file_name, 'w+')
+            file.write(content)
+            file.close()
+        except:
+            raise Exception("Filed creating recovery file: '{}'".format(file_name))
+        print "done\n"
 
 
     def handle_response(self, event):
-        print event
-        self.parse_postgres_conf(self._config.monitor.conf_dir + "/postgresql.conf")
-        self.write_recovery_conf(self._config.monitor.data_dir + "/recovery.conf")
+        resp = ''
+        allowed = ['yes', 'no']
+        while resp not in allowed:
+            resp = raw_input("Master db found at: {}:{} connect replication? YES|no "
+                .format(event.get_message().get("node_name"), event.get_message().get('port'))).lower()
+            if resp.strip() == "":
+                resp = 'yes'
+
+        if resp == 'yes':
+            try:
+                self.parse_postgres_conf(self._config.postgres.conf_dir + "/postgresql.conf")
+                self.write_recovery_conf(self._config.postgres.data_dir + "/recovery.conf", event.get_message())
+            except Exception, e:
+                print e
 
     def _search_for_master(self):
 
