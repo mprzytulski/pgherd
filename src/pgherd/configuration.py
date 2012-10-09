@@ -6,6 +6,7 @@ import os
 import os.path
 import sys
 
+from netaddr import IPNetwork
 from netifaces import interfaces, ifaddresses, AF_INET
 
 class Logging(object):
@@ -16,17 +17,18 @@ class Daemon(object):
     listen = None
     netmask = None
     port = None
-    uid = 'postgres'
-    gid = 'postgres'
+    user = 'postgres'
+    group = 'postgres'
 
 
-class Monitor(object):
+class Connection(object):
     host = 'localhost'
     port = 5432
     user = 'pgherd'
     password = 'pgherd'
     dbname = 'postgres'
 
+class Monitor(Connection):
     interval = 3
     timeout = 3
     attempts = 5
@@ -37,7 +39,7 @@ class Discoverer(object):
     listen = None
     local_ips = []
     broadcast = '<broadcast>'
-
+    network = None
 
 class Commands(object):
     promote_to_master = 'internal'
@@ -97,7 +99,7 @@ class Configuration(object):
         manual = {
             'daemon': ['port'],
             'monitor': ['port', 'interval', 'attempts', 'timeout'],
-            'discoverer': ['port']
+            'discoverer': ['port', 'network']
         }
 
         for section in config.sections():
@@ -118,6 +120,8 @@ class Configuration(object):
         self.monitor.timeout = config.getint('monitor', 'timeout')
 
         self.discoverer.port = config.getint('discoverer', 'port')
+        self.discoverer.network = IPNetwork(config.get('discoverer', 'network'))
+        self.discoverer.broadcast = str(self.discoverer.network.broadcast)
 
         for ifaceName in interfaces():
             for i in ifaddresses(ifaceName).setdefault(AF_INET, [{'addr': None}]):

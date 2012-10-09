@@ -142,6 +142,13 @@ class Discoverer(Thread):
             event.get_message().reply(msg)
         self.logger.debug("Master lookup request received")
 
+    def cluster_status(self, event):
+        from pgherd.daemon import daemon
+        if daemon.node.is_master:
+            msg = DiscovererMessage('cluster.status', daemon.node.as_dict())
+            event.get_message().reply(msg)
+        self.logger.debug("Cluster status request received")
+
     def is_ready(self):
         return False
 
@@ -155,6 +162,7 @@ class Discoverer(Thread):
 
         dispatcher.addListener('discoverer.message.receive.node.up', self.broadcast_receive)
         dispatcher.addListener('discoverer.message.receive.master.lookup', self.master_lookup)
+        dispatcher.addListener('discoverer.message.receive.cluster.status', self.cluster_status)
 
         self._server = DiscovererServer(self._config.listen, self._config.port)
         self._server.start()

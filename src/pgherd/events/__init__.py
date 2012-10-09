@@ -38,7 +38,6 @@ class Dispatcher(object):
             self._listeners[name].fire(event)
 
 class Event(object):
-
     pass
 
 dispatcher = Dispatcher()

@@ -52,7 +52,7 @@ class Daemon(object):
 
         self.discoverer = Discoverer(conf.discoverer)
         self.negotiator = Negotiator(conf.daemon)
-        self.local_monitor = Monitor(conf.monitor, self.node_fqdn, conf.discoverer.local_ips)
+        self.local_monitor = Monitor(conf.monitor, self.node_fqdn, conf.discoverer)
 
         self.negotiator.start()
         self.discoverer.start()
