@@ -5,6 +5,7 @@ import ConfigParser
 import os
 import os.path
 import sys
+import socket
 
 from netaddr import IPNetwork
 from netifaces import interfaces, ifaddresses, AF_INET
@@ -80,6 +81,9 @@ class Configuration(object):
     postgres = Postgres()
     archive = Archive()
 
+    node_fqdn = None
+    node_name = None
+
     def parse(self, argv, mode = 'daemon'):
         parser = argparse.ArgumentParser(prog="pgherd", description="Start pgherd process")
         parser.add_argument('-f', '--config', dest="config_file", default='/etc/pgherd/pgherd.conf', help="Configuration file path")
@@ -93,6 +97,9 @@ class Configuration(object):
             parser.parse_args(argv, self)
         else:
             parser.parse_known_args(argv, self)
+
+        self.node_name = os.uname()[1]
+        self.node_fqdn = socket.getfqdn(socket.gethostname())
 
         if self.config_file is None:
             confs = ['/etc/pgherd/pgherd.conf', os.path.expanduser('~/.pgherd/pgherd.conf')]

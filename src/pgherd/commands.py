@@ -11,8 +11,10 @@ import sys
 import pwd
 import hashlib
 import argparse
+import getpass
 import stat
 import shutil
+import paramiko
 
 from Crypto.PublicKey import RSA
 from distutils.version import StrictVersion
@@ -109,7 +111,11 @@ class Command(object):
             pw = pwd.getpwnam(self._config.daemon.user)
         except KeyError:
             raise RuntimeError("Invalid user: {}".format(self._config.daemon.user))
-        return os.path.expanduser('~/{}/'.format(self._config.daemon.user))
+        if getpass.getuser() == self._config.daemon.user:
+            path = '~/'
+        else:
+            path = '~/{}/'.format(self._config.daemon.user)
+        return os.path.expanduser(path)
 
     def get_hostname(self):
         return os.uname()[1]
@@ -124,7 +130,8 @@ class Command(object):
         resp = ''
         allowed = ['yes', 'no']
         while resp not in allowed:
-            resp = raw_input(question).lower()
+            quest = "{} [{}] ".format(question, ("|".join(allowed)).replace(default, default.upper()))
+            resp = raw_input(quest).lower()
             if resp.strip() == "":
                 resp = default
         return resp
@@ -138,7 +145,7 @@ class Command(object):
         sock.sendto(str(msg), (self._config.discoverer.broadcast, self._config.discoverer.port))
 
         recived_messages = 0
-        while True:
+        while True and messages != 0:
             received = None
             try:
                 received = sock.recv(1024)
@@ -244,10 +251,31 @@ class RestoreCommand(ArchivingCommand):
 
 class GenerateKey(Command):
 
+    def handle_response(self, event):
+        """Handle ssh_key.store event from remote hosts"""
+        try:
+            sys.stdout.write("Receive response form: {} trying to connect...".format(event.get_message().get("host")))
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(hostname=event.get_message().get("host"), username="postgres", password="test")
+            stdin, stdout, stderr = ssh.exec_command("hostname -f")
+            sys.stdout.write(stdout.readlines()[0])
+
+            keys = ssh.get_host_keys()
+            print keys
+
+            sys.stdout.write("ok\n")
+        except:
+            sys.stdout.write("error\n")
+            raise
+
     def run(self, force = False):
         key_dir = self.get_home_dir() + '/.ssh/'
         if not os.path.isdir(key_dir) or force:
             sys.stdout.write("Generate RSA key pair... ")
+
+            os.mkdir(key_dir)
+
             key = RSA.generate(2048, os.urandom)
             f = open(key_dir + 'id_rsa','w')
             f.write(key.exportKey('PEM'))
@@ -260,8 +288,10 @@ class GenerateKey(Command):
                 pass
 
 
+            key_str = key.exportKey('OpenSSH') + " {}@{}".format(self._config.daemon.user, self._config.node_fqdn)
             f = open(key_dir + 'id_rsa.pub', 'w')
-            f.write(key.exportKey('OpenSSH') + " {}@{}".format(self._config.daemon.user, self._config))
+            f.write(key_str)
+            f.close()
 
             try:
                 chown(key_dir + 'id_rsa.pub', self._config.daemon.user, self._config.daemon.group)
@@ -270,13 +300,25 @@ class GenerateKey(Command):
                 pass
 
             sys.stdout.write("done\n")
+
         else:
             print "Using existing RSA key pair"
 
         f = open(key_dir + 'id_rsa.pub', 'r')
-        key = f.read()
+        key_str = f.read()
         f.close()
-        print key
+        print key_str
+
+        if self._config.daemon.allow_pubkey_remote_store:
+            resp = self._ask("It seems that you have configured pgherd to auto broadcast ssh keys, broadcast now?", ['yes', 'no'])
+            if resp == 'yes':
+                msg = DiscovererMessage('ssh_key.broadcast', {'key': key_str, 'auth_key': self._config.daemon.auth_key})
+                try:
+                    self.add_listener('discoverer.message.receive.ssh_key.store')
+                    self.discovery_request(msg)
+                except socket.timeout:
+                    self.logger.exception("Failed when sending discoverer message")
+                    raise
 
 class Recovery(Command):
 
@@ -485,13 +527,13 @@ class InitNode(Command):
         sys.stdout.write("done\n")
 
     def _start_node(self):
-        resp = self._ask("Start node? [YES|no] ", ['yes', 'no'])
+        resp = self._ask("Start node?", ['yes', 'no'])
         if resp == 'yes':
             StartServer(self._config).run()
 
 
     def _init_master(self):
-        resp = self._ask("No master node found init current as master? YES|no ", ['yes', 'no'])
+        resp = self._ask("No master node found init current as master?", ['yes', 'no'])
         if resp == 'yes':
             try:
                 try:
@@ -509,7 +551,7 @@ class InitNode(Command):
             self._start_node()
 
     def _init_slave(self, event):
-        resp = self._ask("Master db found: {} at: {}:{} connect replication? YES|no "
+        resp = self._ask("Master db found: {} at: {}:{} connect replication? "
             .format(event.get_message().get("node_name"), event.get_message().get('listen')[0],
                 event.get_message().get('port')), ['yes', 'no'])
         if resp == 'yes':

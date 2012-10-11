@@ -6,6 +6,7 @@ import logging
 import json
 import uuid
 import SocketServer
+import os
 
 from threading import Thread
 from pgherd.events import dispatcher, Event
@@ -149,6 +150,38 @@ class Discoverer(Thread):
             event.get_message().reply(msg)
         self.logger.debug("Cluster status request received")
 
+    def ssh_key_broadcast(self, event):
+        from pgherd.daemon import daemon
+
+        self.logger.info("Receive ssh key store request with auth_key: {}".format(daemon.config.daemon.auth_key))
+
+        if event.get_message().get("auth_key") != daemon.config.daemon.auth_key:
+            self.logger.warning("Unauthorized auth_key store request")
+            return
+
+        authorized_keys = "{}/.ssh/authorized_keys".format(os.path.expanduser('~/'))
+
+        try:
+
+            if not os.path.isdir(os.path.dirname(authorized_keys)):
+                os.mkdir(os.path.dirname(authorized_keys))
+
+            f = open(authorized_keys, 'a+')
+
+            for line in f:
+                if line.strip() == event.get_message().get("key").strip():
+                    f.close()
+                    self.logger.debug("SSH key already stored.")
+                    return
+
+            f.write("{}\n".format(event.get_message().get("key")))
+            f.close()
+
+            msg = DiscovererMessage('ssh_key.store', {'host': daemon.config.node_fqdn})
+            event.get_message().reply(msg)
+        except:
+            self.logger.exception("Failed storing ssh key into authorized_keys: {}".format(authorized_keys))
+
     def is_ready(self):
         return False
 
@@ -163,6 +196,7 @@ class Discoverer(Thread):
         dispatcher.addListener('discoverer.message.receive.node.up', self.broadcast_receive)
         dispatcher.addListener('discoverer.message.receive.master.lookup', self.master_lookup)
         dispatcher.addListener('discoverer.message.receive.cluster.status', self.cluster_status)
+        dispatcher.addListener('discoverer.message.receive.ssh_key.broadcast', self.ssh_key_broadcast)
 
         self._server = DiscovererServer(self._config.listen, self._config.port)
         self._server.start()
