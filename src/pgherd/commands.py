@@ -9,8 +9,10 @@ import os
 import datetime
 import sys
 import pwd
-import getpass
+import hashlib
+import argparse
 import stat
+import shutil
 
 from Crypto.PublicKey import RSA
 from distutils.version import StrictVersion
@@ -19,6 +21,11 @@ from pgherd.configuration import Connection
 from pgherd.workers.monitor import Connections
 from pgherd.workers.discoverer import DiscovererMessage, discoverer_event_from_data, Event
 from pgherd.libs.table import Table
+from pwd import getpwnam
+from grp import getgrnam
+
+def chown(file, user, group):
+    os.chown(file, getpwnam(user).pw_uid, getgrnam(group).gr_gid)
 
 class Interpreter(cmd.Cmd):
 
@@ -63,6 +70,14 @@ class Interpreter(cmd.Cmd):
         """Recovery current node"""
         cmd = Recovery(self._config)
         cmd.run()
+
+    def do_archive(self, args):
+        cmd = ArchiveCommand(self._config)
+        cmd.run(args)
+
+    def do_restore(self, args):
+        cmd = RestoreCommand(self._config)
+        cmd.run(args)
 
     def do_backup(self, args):
         """Backup current nod to file"""
@@ -114,7 +129,7 @@ class Command(object):
                 resp = default
         return resp
 
-    def discovery_request(self, msg):
+    def discovery_request(self, msg, messages = -1):
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -122,6 +137,7 @@ class Command(object):
 
         sock.sendto(str(msg), (self._config.discoverer.broadcast, self._config.discoverer.port))
 
+        recived_messages = 0
         while True:
             received = None
             try:
@@ -129,8 +145,12 @@ class Command(object):
             except socket.timeout:
                 pass
             if received is not None:
+                recived_messages = recived_messages + 1
                 discoverer_event_from_data(received)
             else:
+                break
+
+            if (recived_messages == messages) or (recived_messages == 1 and messages == -1):
                 break
 
         dispatcher.notify('command.end_of_data', Event())
@@ -156,6 +176,72 @@ class ReloadServer(Command):
     def run(self):
         subprocess.call(["/etc/init.d/postgresql-9.2", "reload"])
 
+class ArchivingCommand(Command):
+
+    def _get_dest_path(self, name):
+        sha = hashlib.sha1(name).hexdigest()
+        return '{}/{}'.format(sha[0:2], name)
+
+    def _parse_params(self, args):
+        argv = args.split(" ")
+
+        class Args(object):
+            file = None
+            path = None
+
+        args = Args()
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('-s', dest="file", help="Fail to archive")
+        parser.add_argument('-p', dest="path", help="Path of file to archive")
+        parser.parse_args(argv, args)
+
+        return args
+
+    def _call(self, method, args):
+        args = self._parse_params(args)
+
+        method_name = "_{}_{}".format(method, self._config.archive.mode)
+        if hasattr(self, method_name):
+            to_call = getattr(self, method_name)
+            to_call(args)
+
+
+class ArchiveCommand(ArchivingCommand):
+
+    def _archive_scp(self, args):
+        pass
+
+    def _archive_local(self, args):
+        dest = "{}{}".format(self._config.archive.location, self._get_dest_path(args.file))
+        src = "{}/{}".format(self._config.postgres.data_dir, args.path)
+
+        dir = os.path.dirname(dest)
+        if not os.path.isdir(dir):
+            os.mkdir(dir)
+
+        self.logger.info("Local archiving: '{}' from: {} to: {}".format(args.file, src, dest))
+        os.rename(src, dest)
+
+    def run(self, args):
+        self._call('archive', args)
+
+class RestoreCommand(ArchivingCommand):
+
+    def _restore_scp(self, args):
+        pass
+
+    def _restore_local(self, args):
+        src = "{}{}".format(self._config.archive.location, self._get_dest_path(args.file))
+        dest = "{}/{}".format(self._config.postgres.data_dir, args.path)
+
+        self.logger.info("Local restore: '{}' from: {} to: {}".format(args.file, src, dest))
+        shutil.copy2(src, dest)
+
+    def run(self, args):
+        self._call('restore', args)
+
+
 class GenerateKey(Command):
 
     def run(self, force = False):
@@ -168,7 +254,7 @@ class GenerateKey(Command):
             f.close()
 
             try:
-                os.chown(key_dir + 'id_rsa', self._config.daemon.user, self._config.daemon.group)
+                chown(key_dir + 'id_rsa', self._config.daemon.user, self._config.daemon.group)
                 os.chmod(key_dir + 'id_rsa', stat.S_IRUSR)
             except:
                 pass
@@ -178,7 +264,7 @@ class GenerateKey(Command):
             f.write(key.exportKey('OpenSSH') + " {}@{}".format(self._config.daemon.user, self._config))
 
             try:
-                os.chown(key_dir + 'id_rsa.pub', self._config.daemon.user, self._config.daemon.group)
+                chown(key_dir + 'id_rsa.pub', self._config.daemon.user, self._config.daemon.group)
                 os.chmod(key_dir + 'id_rsa.pub', stat.S_IRUSR)
             except:
                 pass
@@ -195,11 +281,14 @@ class GenerateKey(Command):
 class Recovery(Command):
 
     def _rsync_data(self, path, master_host):
+
         sys.stdout.write("rsync data: {}... ".format(path))
-        rsync_opts = "--exclude=pg_xlog* --exclude=pg_control --exclude=*.pid {}@{} {}".format(
-            self._config.daemon.user, master_host, path
-        )
-        self.logger.info("Call rsync: {} {}".format(self._config.commands.rsync, rsync_opts))
+        rsync_opts = "--exclude=pg_xlog* --exclude=pg_control --exclude=*.pid " \
+         "--archive --checksum --compress --progress --rsh=ssh"\
+
+        rsync_data = "{}@{}:{} {}".format(self._config.daemon.user, master_host, path, path)
+
+        self.logger.info("Call: {} {} {}".format(self._config.commands.rsync, rsync_opts, rsync_data))
         subprocess.call(self._config.commands.rsync, rsync_opts)
         sys.stdout.write("done\n")
 
@@ -216,15 +305,17 @@ class Recovery(Command):
 
     def handle_response(self, event):
 
+        message = event.get_message()
+
         conf = Connection()
-        conf.host = event.get("listen")[0]
-        conf.port = event.get("host")
+        conf.host = message.get("listen")[0]
+        conf.port = message.get("host")
         conf.dbname = self._config.monitor.dbname
         conf.user = self._config.monitor.user
         conf.password = self._config.monitor.password
 
         connections = Connections(self._config.discoverer)
-        connections.set_master(conf, event.get_message().get("node_name"))
+        connections.set_master(conf, message.get("node_name"))
 
         try:
             sys.stdout.write("Connecting to masterdb... ")
@@ -233,15 +324,19 @@ class Recovery(Command):
             sys.stdout.write("Getting information about tablespace... ")
             version = StrictVersion(event.get_message().get('version'))
             if version >= StrictVersion('9.2'):
-                sql = "SELECT pg_tablespace_location(oid) spclocation FROM pg_tablespace " \
+                sql = "SELECT pg_tablespace_location(oid) AS location FROM pg_tablespace " \
                       "WHERE spcname NOT IN ('pg_default', 'pg_global');"
             elif version < StrictVersion('9.2'):
-                sql = "SELECT spclocation FROM pg_tablespace " \
+                sql = "SELECT spclocation AS location FROM pg_tablespace " \
                       "WHERE spcname NOT IN ('pg_default', 'pg_global');"
             cursor.execute(sql)
 
-            tablespaces = cursor.fetchall()
+            tablespaces = []
+            for tblspace in cursor.fetchall():
+                tablespaces.append(tblspace['location'])
+
             tablespaces.append(self._config.postgres.data_dir)
+
             sys.stdout.write("done\n")
 
             sys.stdout.write("Starting PostgreSQL backup\n")
@@ -251,14 +346,15 @@ class Recovery(Command):
                 self._rsync_data(tablespace, conf.host)
 
             cursor.execute("select pg_stop_backup()")
-            sys.stdout.write("PostgreSQL backup done\n")
             cursor.close()
+            sys.stdout.write("PostgreSQL backup done\n")
 
-            self._reconfigure_node()
-            self._start_node()
+#            self._reconfigure_node()
+#            self._start_node()
 
         except:
-            pass
+            self.logger.exception("Failed connecting to masterdb at: {}".format(conf.host))
+            raise
 
         pass
 
@@ -270,7 +366,7 @@ class Recovery(Command):
         self.add_listener('discoverer.message.receive.master.info')
         msg = DiscovererMessage('master.lookup')
         try:
-            self.discovery_request(msg)
+            self.discovery_request(msg, 1)
         except socket.timeout:
             raise
 
@@ -302,28 +398,33 @@ class InitNode(Command):
 
     _slave = False
 
-    def postgres_conf_listen_addresses(self, val):
+    def postgres_conf_listen_addresses(self, val, master):
         return "listen_addresses = '*'"
 
-    def postgres_wal_level(self, val):
+    def postgres_wal_level(self, val, master):
         return "wal_level = 'hot_standby'"
 
-    def postgres_wal_senders(self, val):
+    def postgres_wal_senders(self, val, master):
         return "max_wal_senders = 5"
 
-    def postgres_wal_keep_segments(self, val):
+    def postgres_wal_keep_segments(self, val, master):
         return "wal_keep_segments = 32"
 
-    def postgres_archive_mode(self, val):
+    def postgres_archive_mode(self, val, master):
         return "archive_mode = 'on'"
 
-    def postgres_archive_command(self, val):
+    def postgres_archive_command(self, val, master):
         return "archive_command = '{}'".format(self._config.postgres.archive_command)
 
-    def postgres_hot_standby(self, val):
-        return "hot_standby = on"
+    def postgres_hot_standby(self, val, master):
+        if master:
+            return "hot_standby = off"
+        else:
+            return "hot_standby = on"
 
-    def _create_postgres_conf(self, file_name):
+    def _create_postgres_conf(self, file_name, master = False):
+
+        self.logger.debug("Creating postgresql.conf, is master: {}".format(master))
 
         if not os.path.exists(file_name):
             raise Exception("Invalid postgresql configuration file: '{}'".format(file_name))
@@ -339,7 +440,7 @@ class InitNode(Command):
                     if hasattr(self, name):
                         to_call = getattr(self, name)
                         val = matches.group(3).strip()
-                        nline = to_call(val)
+                        nline = to_call(val, master)
                         if nline != line.strip():
                             line = "{}\n#org: {}".format(nline, line)
 
@@ -356,10 +457,12 @@ class InitNode(Command):
             for item in new_config:
                 file.write(item)
 
-        os.chown(file_name, 'postgres', 'postgres')
+        chown(file_name, 'postgres', 'postgres')
         sys.stdout.write("done\n")
 
     def _create_recovery_conf(self, file_name, master):
+
+        self.logger.debug("Creating recovery.conf")
 
         sys.stdout.write("Creating {}... ".format(file_name))
         content = "$ $EDITOR recovery.conf\n" \
@@ -375,7 +478,7 @@ class InitNode(Command):
             file.write(content)
             file.close()
 
-            os.chown(file_name, 'postgres', 'postgres')
+            chown(file_name, 'postgres', 'postgres')
         except:
             raise Exception("Filed creating recovery file: '{}'".format(file_name))
 
@@ -399,7 +502,7 @@ class InitNode(Command):
                     os.remove(self._config.replication.trigger_file)
                 except:
                     pass
-                self._create_postgres_conf(self._config.postgres.conf_dir + "/postgresql.conf")
+                self._create_postgres_conf(self._config.postgres.conf_dir + "/postgresql.conf", True)
             except Exception, e:
                 print e
 
@@ -411,7 +514,7 @@ class InitNode(Command):
                 event.get_message().get('port')), ['yes', 'no'])
         if resp == 'yes':
             try:
-                self._create_postgres_conf(self._config.postgres.conf_dir + "/postgresql.conf")
+                self._create_postgres_conf(self._config.postgres.conf_dir + "/postgresql.conf", False)
                 self._create_recovery_conf(self._config.postgres.data_dir + "/recovery.conf", event.get_message())
             except Exception, e:
                 print e

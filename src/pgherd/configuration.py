@@ -22,6 +22,11 @@ class Daemon(object):
     auth_key = None
     allow_pubkey_remote_store = True
 
+class Archive(object):
+    location = '/archive/'
+    user = 'postgres'
+    host = 'grunwald'
+    mode = 'scp'
 
 class Connection(object):
     host = 'localhost'
@@ -48,6 +53,7 @@ class Commands(object):
     follow_master = 'internal'
     rsync = None
     ssh = None
+    scp = None
 
 class Postgres(object):
     data_dir = '/var/lib/postgresql-9.2/data'
@@ -72,11 +78,15 @@ class Configuration(object):
     commands = Commands()
     replication = Replication()
     postgres = Postgres()
+    archive = Archive()
 
     def parse(self, argv, mode = 'daemon'):
         parser = argparse.ArgumentParser(prog="pgherd", description="Start pgherd process")
         parser.add_argument('-f', '--config', dest="config_file", default='/etc/pgherd/pgherd.conf', help="Configuration file path")
         parser.add_argument('--version', action='version', version='%(prog)s 0.1.0')
+
+        if type(argv).__name__ == 'str':
+            argv = argv.split(" ")
 
         if mode == 'daemon':
             parser.add_argument('-n', dest="demonize", default=False, action="store_false", help="Don't demonize process")

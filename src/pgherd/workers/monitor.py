@@ -102,10 +102,10 @@ class Connections:
             conn.autocommit = True
         except psycopg2.OperationalError, psycopg2.InternalError:
             err = "Failed connecting node {}:{}/{} with user: '{}'".format(
-                self._local_config.host,
-                self._local_config.port,
-                self._local_config.dbname,
-                self._local_config.user
+                host,
+                port,
+                dbname,
+                username
             )
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.exception(err)
@@ -116,8 +116,8 @@ class Connections:
 
     def get_master(self):
         if self._master is None:
-            self._master = self._get_connection(self._local_config.dbname, self._local_config.user,
-                self._local_config.password, self._local_config.host, self._local_config.port)
+            self._master = self._get_connection(self._master_config.dbname, self._master_config.user,
+                self._master_config.password, self._master_config.host, self._master_config.port)
 
         return self._master.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 

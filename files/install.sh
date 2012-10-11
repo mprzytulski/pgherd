@@ -1,38 +1,76 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+export PATH="${PATH}:/usr/bin/"
 
 GIT_PATH=`which git`
 VIRTUALENV_PATH=`which virtualenv`
 
-if [ "${GIT_PATH}" == "" or "${VIRTUALENV_PATH}" == "" ]; then
+if [ "${GIT_PATH}" == "" ] || [ "${VIRTUALENV_PATH}" == "" ]; then
     echo "Install script require git and virtualenv"
     exit 1
 fi
 
-if [ $# -ne 2 ]; then
+if [ $# -ne 1 ]; then
     echo "usage: install.sh <path>"
     exit 2
 fi
 
-PATH=$1
+INSTALL_PATH=$1
 
-mkdir -p ${PATH}
+echo "Using git: ${GIT_PATH}"
+echo "Using virtualenv: ${VIRTUALENV_PATH}"
+echo "Install into: ${INSTALL_PATH}"
 
-`${VIRTUALENV_PATH} ${PATH}/env`
-source ${PATH}/env/bin/activate
+mkdir -p ${INSTALL_PATH}
 
-pip install lockfile
-pip install netaddr
-pip install netifaces
-pip install psycopg2
-pip install pycrypto
-pip install python-daemon
+if [ ! -d "${INSTALL_PATH}/env" ]; then
 
-cd ${PATH}
+	${VIRTUALENV_PATH} "${INSTALL_PATH}/env"
+	source ${INSTALL_PATH}/env/bin/activate
 
-`${GIT_PATH} clone git://github.com/mprzytulski/pgherd.git`
-cd pgherd
+	pip install lockfile
+	pip install netaddr
+	pip install netifaces
+	pip install psycopg2
+	pip install pycrypto
+	pip install python-daemon
 
-mkdir /etc/pgherd
-cp ./pgherd/files/pgherd.conf /etc/pgherd/
-cd ./pgherd/src
-python pgherd.py install
+fi
+
+cd ${INSTALL_PATH}
+
+if [ ! -f /etc/pgherd/env ]; then
+    echo "PGHERD_INSTALL_DIR=\"${INSTALL_PATH}\"" > /etc/pgherd/env
+fi
+
+if [ ! -d ${INSTALL_PATH}/pgherd ]; then
+	${GIT_PATH} clone git://github.com/mprzytulski/pgherd.git
+else
+	cd ${INSTALL_PATH}/pgherd
+	${GIT_PATH} pull
+	cd ${INSTALL_PATH}
+fi
+
+cd ./pgherd
+
+if [ ! -d /etc/pgherd ]; then
+	mkdir /etc/pgherd
+	cp ${INSTALL_PATH}/pgherd/files/pgherd.conf /etc/pgherd/
+fi
+
+if [ ! -d /var/log/pgherd ]; then
+    mkdir /var/log/pgherd
+fi
+
+if [ ! -d /var/run/pgherd ]; then
+    mkdir /var/run/pgherd
+fi
+
+ln -sf ${INSTALL_PATH}/pgherd/files/pgherd /usr/sbin/pgherd
+ln -sf ${INSTALL_PATH}/pgherd/files/pgherdd /usr/sbin/pgherdd
+chmod +x /usr/sbin/pgherd
+chmod +x /usr/sbin/pgherdd
+
+cd ~/
+
+echo "done"

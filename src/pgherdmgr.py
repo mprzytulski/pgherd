@@ -1,3 +1,4 @@
+#!/usr/bin/env python2.7
 __author__ = 'mike'
 
 import sys
@@ -32,8 +33,16 @@ def main():
 
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
+
+    args = sys.argv
+    if type(args).__name__ == 'str':
+        args = args.split(" ")
+
+    if __file__ in args:
+        args.remove(__file__)
+
     conf = Configuration()
-    conf.parse(sys.argv[1:], 'manager'  )
+    conf.parse(args, 'manager')
 
     # Add the log message handler to the logger
     file = logging.handlers.RotatingFileHandler(conf.logging.destination, maxBytes=10485760, backupCount=5)
@@ -57,8 +66,7 @@ def main():
 
     i = Interpreter(conf)
 
-    if len(sys.argv) > 1:
-        args = sys.argv[1:]
+    if len(args) >= 1:
         if '-f' in args:
             args.remove(args[args.index('-f')+1])
             args.remove('-f')

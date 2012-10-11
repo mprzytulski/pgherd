@@ -1,2 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
+source /etc/pgherd/env
+
+${PGHERD_INSTALL_DIR}/env/bin/python ${PGHERD_INSTALL_DIR}/pgherd/src/pgherdmgr.py $@
