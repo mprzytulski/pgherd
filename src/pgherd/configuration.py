@@ -19,6 +19,8 @@ class Daemon(object):
     port = None
     user = 'postgres'
     group = 'postgres'
+    auth_key = None
+    allow_pubkey_remote_store = True
 
 
 class Connection(object):
@@ -44,6 +46,8 @@ class Discoverer(object):
 class Commands(object):
     promote_to_master = 'internal'
     follow_master = 'internal'
+    rsync = None
+    ssh = None
 
 class Postgres(object):
     data_dir = '/var/lib/postgresql-9.2/data'
@@ -97,7 +101,7 @@ class Configuration(object):
         config.read(self.config_file)
 
         manual = {
-            'daemon': ['port'],
+            'daemon': ['port', 'allow_pubkey_remote_store'],
             'monitor': ['port', 'interval', 'attempts', 'timeout'],
             'discoverer': ['port', 'network']
         }
@@ -113,6 +117,7 @@ class Configuration(object):
 
 
         self.daemon.port = config.getint('daemon', 'port')
+        self.daemon.allow_pubkey_remote_store = config.getboolean('daemon', 'allow_pubkey_remote_store')
 
         self.monitor.port = config.getint('monitor', 'port')
         self.monitor.interval = config.getint('monitor', 'interval')
